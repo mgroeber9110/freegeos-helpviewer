@@ -1,0 +1,69 @@
+/*...SGenPrimaryClass HelpViewPrimary:0:*/
+/*...sGenInteractionClass \9\\9\\47\\42\ File menu \42\\47\:4:*/
+    /*
+     *              File menu
+     */
+    GII_visibility = GIV_POPUP;         /* create popup menu */
+    ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_FILE_MENU;
+                                        /* place into file menu */
+/*...sGenInteractionClass OpenDialog  \47\\42\ Open a file \42\\47\:8:*/
+    GI_visMoniker = 'O',"Open";
+    GII_visibility = GIV_DIALOG;
+    GII_type = GIT_COMMAND;
+/*...sGenFileSelectorClass ConvFileS  \47\\42\ File selection box \42\\47\:12:*/
+    GFSI_destination = process; 
+    GFSI_notificationMsg = MSG_Help_OPEN_FILE; 
+    ATTR_GEN_FILE_SELECTOR_CREATOR_MATCH = {"hlpv",0};
+    HINT_FILE_SELECTOR_NUMBER_OF_FILES_TO_SHOW = 8;
+    HINT_FILE_SELECTOR_FILE_LIST_WIDTH = 40;
+/*...e*/
+/*...sGenTriggerClass OpenTrigger     \47\\42\ \34\Open\34\ button \42\\47\:12:*/
+    GI_visMoniker = 'O',"Open";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_OPEN_TRIGGER;
+    HINT_SEEK_REPLY_BAR;
+/*...e*/
+/*...sGenTriggerClass  \9\\9\\47\\42\ \34\Go to Help\34\ button \42\\47\:12:*/
+    GI_visMoniker = 'H',"Go to Help";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_GO_TO_HELP_TRIGGER;
+    HINT_SEEK_REPLY_BAR;
+/*...e*/
+/*...e*/
+/*...sGenInteractionClass             \47\\42\ \34\Slideshow\34\ options \42\\47\:8:*/
+    GI_visMoniker = 'w',"Slide show";
+    GII_visibility = GIV_POPUP;
+/*...sGenTriggerClass TriggerRecord:12:*/
+    GI_visMoniker = "Record";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_RECORD;
+/*...e*/
+/*...sGenTriggerClass TriggerPlay:12:*/
+    GI_visMoniker = "Play";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_PLAY;
+/*...e*/
+/*...sGenTriggerClass TriggerStop:12:*/
+    GI_visMoniker = "Stop";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_STOP;
+/*...e*/
+/*...sGenTriggerClass TriggerPause:12:*/
+    GI_visMoniker = "Pause";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_PAUSE;
+/*...e*/
+/*...e*/
+/*...e*/
+/*...SHelpViewHelpControlClass HelpViewHelpObject:4:*/
+    GII_visibility = GIV_SUB_GROUP;
+    HCI_helpType = HT_NORMAL_HELP;
+    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
+    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
+    ATTR_HELP_INITIAL_HELP = "TOC";
+
+    /* UI_PROH_DEF and UI_REQU_DEF are defined in the main application. */
+    ATTR_GEN_CONTROL_PROHIBIT_UI = UI_PROH;
+    ATTR_GEN_CONTROL_REQUIRE_UI = UI_REQU;
+/*...e*/
+/*...e*/

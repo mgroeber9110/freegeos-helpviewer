@@ -1,0 +1,538 @@
+/***********************************************************************
+ *
+ * PROJECT:       mg's help viewer for PC/Geos
+ * MODULE:        mg_helpv.goc
+ *
+ * AUTHOR:        Marcus Gr”ber
+ *
+ * REVISION HISTORY:
+ *	Date	  Name	    Description
+ *	----	  ----	    -----------
+ *	12/ 8/92  gene	    Initial version
+ *          1994  marcusg   Extensive modifications...
+ *
+ * DESCRIPTION:
+ *      Help viewer
+ *
+ * NOTE:
+ *      If there are any errors complaining about missing "MSG_HC_*" messages,
+ *      check in the objects\helpcc.goh include file if the comment
+ *      after the MSG_HC_GOTO_HISTORY message declaration is correctly
+ *      terminated - this is a bug in the include files of SDK 1.0 and 2.0.
+ *
+ ***********************************************************************/
+/*
+ ***************************************************************************
+ *		Include files
+ ***************************************************************************
+ */
+
+@include <stdapp.goh>
+#include <ansi\stdio.h>
+#include <ansi\string.h>
+#include <gstring.h>
+#include <token.h>
+#include <ec.h>
+
+#define TEMPORARY_LINK "mg_helpv temporary"
+                                        // temporary link file name
+
+/*
+   Minimum protocol version required for ui.geo to support GEN_PATH_SET
+   on help object.
+*/
+#define PATH_SET_UI_MAJOR 743
+#define PATH_SET_UI_MINOR 3
+
+Boolean UsePathSet;                     /* if true, MSG_GEN_PATH_SET is used
+                                           to set the helpfile's path */
+
+/*
+ ***************************************************************************
+ *		Class & Message Definitions
+ ***************************************************************************
+ */
+
+@class  HelpViewProcessClass, GenProcessClass;
+    @message (GEN_FILE_SELECTOR_NOTIFICATION_MSG) MSG_Help_OPEN_FILE;
+    @message void MSG_HelpView_OPEN_TRIGGER();
+    @message void MSG_HelpView_GO_TO_HELP_TRIGGER();
+    @message void MSG_HelpView_RECORD();
+    @message void MSG_HelpView_STOP();
+    @message void MSG_HelpView_PAUSE();
+    @message void MSG_HelpView_PLAY();
+    @message void MSG_HelpView_TURN_PAGE();
+@endc;  /* end of class definition */
+
+@class  HelpViewHelpControlClass, HelpControlClass;
+@endc;  /* end of class definition */
+
+@classdecl      HelpViewProcessClass, neverSaved;
+@classdecl      HelpViewHelpControlClass;
+
+/*
+ ***************************************************************************
+ *		UI Objects
+ ***************************************************************************
+ */
+
+/* application resource */
+@start  AppResource;
+  @object GenApplicationClass HelpViewApp = {
+      GI_visMoniker = list { @TextMoniker,@App_Icon0,@App_Icon1,@App_Icon2 };
+      GI_comp = @HelpViewPrimary;
+      gcnList(MANUFACTURER_ID_GEOWORKS,GAGCNLT_WINDOWS) =
+          @HelpViewPrimary;
+      gcnList(MANUFACTURER_ID_GEOWORKS,MGCNLT_ACTIVE_LIST) =
+          @HelpViewHelpObject;
+  }
+  /* placing the following moniker inside the HelpViewMonikerResource causes
+     an unexplained slowdown to the file selector and possibly the rest
+     of the application... */
+  @visMoniker TextMoniker = "mg's Help Viewer";
+@end    AppResource
+
+
+/* define required, prohibited and conditional help object API */
+#define UI_PROH (HPCF_CLOSE | HPCF_FIRST_AID_GO_BACK | HPCF_CONTENTS)
+#define UI_REQU (0)
+#define UI_VARI (HPCF_GO_BACK | HPCF_HISTORY | HPCF_FIRST_AID)
+
+/* Help Object UI definitions - default: all on */
+#define UI_REQU_DEF UI_VARI
+
+/* Help Object UI definitions - recording mode: history disabled */
+#define UI_REQU_REC (UI_VARI & ~HPCF_HISTORY)
+
+/* Help Object UI definitions - playback mode: same as recording */
+#define UI_REQU_PLA (UI_VARI & ~HPCF_HISTORY)
+
+/* resource for misc UI objects */
+@start  Interface;
+  @include "help_ui.goh"
+@end Interface
+
+
+/* resource for doc monikers */
+@start HelpViewMonikerResource, data;
+  /* list of monikers used for the help file documents */
+  @visMoniker HelpfileMonikerList = @list {@Help_Icon0,@Help_Icon1,@Help_Icon2};
+  @include "art/docicon.goh"            /* document monikers */
+  @include "art/appicon.goh"            /* application monikers */
+@end   HelpViewMonikerResource;
+
+#define MAX_SLIDES 512
+
+struct _appstate {
+  DiskHandle disk;
+  char path[PATH_BUFFER_SIZE];
+  char name[PATH_BUFFER_SIZE];
+  unsigned n_slides;
+  struct {
+    unsigned type;                      /* type of slide */
+      #define ST_FOLLOW_LINK  1
+      #define ST_GO_BACK      2
+      #define ST_BRING_UP_TOC 3
+      #define ST_CHOOSE_FA    4
+    union {
+      struct { unsigned nameToken,fileToken; } link;
+      VisTextContextType fatype;
+    } d;
+    dword time;
+  } slide[MAX_SLIDES];
+} appstate;
+
+dword lasttime;         /* tick count when last slide was opened */
+word record_mode;       /* 0=normal mode, 1=Recording active, 2=Replay active */
+word play_position;     /* position in slide list which is currently played */
+
+TimerHandle turn_th;
+word        turn_tid;
+
+
+void select_helpfile(DiskHandle disk,char *path,char *name)
+{
+    optr helpobj = GeodeGetOptrNS(@HelpViewHelpObject);
+    char *p,tempname[PATH_BUFFER_SIZE],fullname[PATH_BUFFER_SIZE];
+
+    @call helpobj::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+
+    if(!UsePathSet) {                   /* old method with temporary file */
+      p=tempname;                       /* make double indirection clean */
+      FileConstructFullPath(&p,PATH_BUFFER_SIZE,SP_HELP_FILES,TEMPORARY_LINK,
+        TRUE);                          /* full name of temporary file */
+      FileDelete(tempname);             /* delete existing temporary link */
+    }
+
+    if(name && *name) {                 /* parameter NULL closes helpfile */
+      if(UsePathSet) {                  /* "modern" method */
+        @call helpobj::MSG_GEN_PATH_SET(path,disk);
+                                          /* set help file path */
+        @call helpobj::MSG_META_ADD_VAR_DATA(
+          ATTR_HELP_INITIAL_HELP_FILE,strlen(name)+1,name);
+      }
+      else {                            /* older method */
+        p=fullname;                     /* make double indirection clean */
+        FileConstructFullPath(&p,PATH_BUFFER_SIZE,disk,path,TRUE);
+                                        /* assemble full path to help file */
+        if(fullname[strlen(fullname)-1]!='\\')
+          strcat(fullname,"\\");        /* add backslash to pathname */
+        strcat(fullname,name);          /* append help file name */
+
+        /* workaround: FileCreateLink C wrapper doesn't save DI register */
+        _asm { push di }
+        FileCreateLink(tempname,0,fullname,0);
+        _asm { pop di }
+
+        @call helpobj::MSG_META_ADD_VAR_DATA(
+          ATTR_HELP_INITIAL_HELP_FILE,strlen(TEMPORARY_LINK)+1,TEMPORARY_LINK);
+      }
+      appstate.disk = disk;             /* store current help file */
+      strcpy(appstate.path,path);
+      strcpy(appstate.name,name);
+      @send helpobj::MSG_GEN_SET_USABLE(VUM_NOW);
+
+    }                                   
+    else                                /* parameter NULL closes helpfile */
+      *appstate.name='\0';              /* No help file yet */
+    appstate.n_slides=0;                /* No slides yet */
+}
+
+void update_record_controls(void)
+{
+    if(record_mode) {
+      switch(record_mode) {
+        case 1:                         /*** Recording */
+          @send GeodeGetOptrNS(@TriggerPlay)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+          @send GeodeGetOptrNS(@TriggerPause)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+          break;
+        case 2:                         /*** Playing */
+          @send GeodeGetOptrNS(@TriggerPlay)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+          @send GeodeGetOptrNS(@TriggerPause)::MSG_GEN_SET_ENABLED(VUM_NOW);
+          break;
+        case 3:                         /*** Paused */
+          @send GeodeGetOptrNS(@TriggerPlay)::MSG_GEN_SET_ENABLED(VUM_NOW);
+          @send GeodeGetOptrNS(@TriggerPause)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+          break;
+      }
+      @send GeodeGetOptrNS(@TriggerStop)::MSG_GEN_SET_ENABLED(VUM_NOW);
+      @send GeodeGetOptrNS(@TriggerRecord)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+      @send GeodeGetOptrNS(@OpenDialog)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+    }
+    else {
+      @send GeodeGetOptrNS(@TriggerStop)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+      @send GeodeGetOptrNS(@TriggerPause)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+      @send GeodeGetOptrNS(@TriggerRecord)::MSG_GEN_SET_ENABLED(VUM_NOW);
+      if(appstate.n_slides>1)
+        @send GeodeGetOptrNS(@TriggerPlay)::MSG_GEN_SET_ENABLED(VUM_NOW);
+      else
+        @send GeodeGetOptrNS(@TriggerPlay)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+      @send GeodeGetOptrNS(@OpenDialog)::MSG_GEN_SET_ENABLED(VUM_NOW);
+    }
+}
+
+/*
+ *      Bring up table of contents together with a change of control features:
+ *      This is combined in one routine because changing help control features
+ *      resets the topic shown to the initial topic (here: toc) anyway.
+ */
+void bring_up_toc(WordFlags addUI)
+{
+    optr helpobj = GeodeGetOptrNS(@HelpViewHelpObject);
+
+    @send helpobj::MSG_GEN_SET_NOT_USABLE(VUM_NOW);
+                                        /* keep screen quiet */
+    if(addUI==UI_VARI)                  /* all variable UI features enabled? */
+      @send helpobj::MSG_GEN_CONTROL_ADD_FEATURE(addUI);
+                                        /* yes: turn everything on */
+    else
+      @send helpobj::MSG_GEN_CONTROL_REMOVE_FEATURE((~addUI) & UI_VARI);
+                                        /* no: unset variable features off */
+    @send helpobj::MSG_GEN_SET_USABLE(VUM_NOW);
+}
+
+void open_action(void)
+{
+    char name[PATH_BUFFER_SIZE],path[PATH_BUFFER_SIZE];
+    dword ret;
+    optr fsobj = GeodeGetOptrNS(@ConvFileS);
+
+    @call fsobj::MSG_GEN_FILE_SELECTOR_GET_SELECTION(name);
+    @call fsobj::MSG_GEN_PATH_GET(path,sizeof(path));
+                                        /* get path/name of helpfile */
+
+    @send GeodeGetOptrNS(@OpenDialog)::MSG_GEN_GUP_INTERACTION_COMMAND
+      (IC_DISMISS);                     /* we no longer need the open dialog */
+
+    appstate.n_slides=0;                /* forget slide show of old help file */
+    update_record_controls();
+
+    select_helpfile(@call fsobj::MSG_GEN_PATH_GET_DISK_HANDLE(),path,name);
+                                        /* open helpfile */
+}
+
+void stop_action(void)
+{
+    if(turn_th) {                       /* still playing? */
+      TimerStop(turn_th,turn_tid);      /* Kill pending turnover event */
+      turn_th=0;                        /* note that timer has been removed */
+    }
+    record_mode=0;                      /* no more recording */
+}
+
+void schedule_next_step(optr oself)
+{
+    turn_th = TimerStart(TIMER_EVENT_ONE_SHOT,oself,
+                         appstate.slide[play_position].time,
+                         MSG_HelpView_TURN_PAGE,0,&turn_tid);
+                                        /* Schedule another redraw attempt */
+}
+
+@method HelpViewProcessClass, MSG_GEN_PROCESS_OPEN_APPLICATION
+{
+    AppLaunchBlock *alb;
+    char *p;
+    struct _appstate *ch;
+    GeodeHandle gh;
+    ProtocolNumber prot;
+
+    *appstate.name='\0';                /* No help file yet */
+    appstate.n_slides=0;                /* No slides yet */
+    record_mode=0;                      /* Not currently recording */
+    turn_th=0;                          /* No timer active */
+
+    /* Find out if operating system supports MSG_GEN_SET_PATH on help obj */
+    gh=GeodeFind("ui      ",GEODE_NAME_SIZE,GA_LIBRARY,0);
+    if(gh) {                            /* Locate ui.geo to check version */
+      GeodeGetInfo(gh,GGIT_GEODE_PROTOCOL,&prot);
+                                        /* Get protocol level of ui lib */
+      UsePathSet=(prot.PN_major>PATH_SET_UI_MAJOR ||
+        (prot.PN_major==PATH_SET_UI_MAJOR && prot.PN_minor>=PATH_SET_UI_MINOR));
+                                        /* Is it recent enough for PathSet? */
+    }
+    else                                /* ui.geo could not be located: */
+      UsePathSet=FALSE;                 /* Play it safe, use ancient method */
+
+    if(!extraState) {                   /*** "fresh" start, no saved state */
+      if(launchBlock) {
+        alb = (AppLaunchBlock *)MemLock(launchBlock);
+        if(*(alb->ALB_dataFile))        /* has been launched with a filename? */
+          select_helpfile(alb->ALB_diskHandle,alb->ALB_path,alb->ALB_dataFile);
+                                        /* open specified helpfile */
+        else
+          select_helpfile(SP_HELP_FILES,"","mg_helpv help file");
+                                        /* open default helpfile */
+        MemUnlock(launchBlock);
+      }
+    }
+    else {                              /*** started from saved state */
+      /* copy saved data from extra block */
+      ch = (struct _appstate *)MemLock(extraState);
+      if(*(ch->name))                   /* shut down with an open helpfile? */
+        select_helpfile(ch->disk,ch->path,ch->name);
+                                        /* open last helpfile */
+      appstate.n_slides = ch->n_slides;
+      memcpy(appstate.slide,ch->slide,sizeof(ch->slide));
+                                        /* restore slideshow */
+      MemUnlock(extraState);
+    }
+    @send GeodeGetOptrNS(@HelpViewHelpObject)::
+      MSG_GEN_CONTROL_ADD_FEATURE(UI_REQU_DEF);
+
+    update_record_controls();           /* set recorder controls to state */
+
+    @callsuper();
+}
+
+@method HelpViewProcessClass, MSG_GEN_PROCESS_CLOSE_APPLICATION
+{
+    MemHandle bl;
+    char *p;
+
+    stop_action();                      /* stop recorder/player */
+    bl = MemAlloc(sizeof(appstate), HF_DYNAMIC|HF_SHARABLE, 0);
+    p = (char *)MemLock(bl);
+    memcpy(p,&appstate,sizeof(appstate));
+    MemUnlock(bl);
+    select_helpfile(0,NULL,NULL);       /* close current helpfile */
+    @callsuper();
+    return bl;                          /* remember name of current helpfile */
+}
+
+@method HelpViewProcessClass, MSG_GEN_PROCESS_INSTALL_TOKEN
+{
+    TokenFlags tokenFlags;
+    dword hlpfChars = TOKEN_CHARS('h', 'l', (dword)'p', (dword)'f');
+
+    /*
+     * call the superclass to install the app token and moniker list
+     */
+    @callsuper();
+
+    if (!TokenGetTokenInfo(hlpfChars,MANUFACTURER_ID_GEOWORKS,
+                           &tokenFlags)) {
+        TokenDefineToken(hlpfChars,MANUFACTURER_ID_GEOWORKS,
+                         @HelpfileMonikerList,
+			 0);	/* Moniker list is in data resource, so no
+				 * object relocation required */
+    }
+}
+
+@method HelpViewProcessClass, MSG_Help_OPEN_FILE
+{
+    if(GFS_GET_ENTRY_TYPE(entryFlags)==GFSET_FILE && (entryFlags&GFSEF_OPEN))
+      open_action();                    /* user has double-clicked a file */
+
+/* conditionally enable "open" trigger if current selection is a file */
+    if(GFS_GET_ENTRY_TYPE(entryFlags)==GFSET_FILE)
+      @send GeodeGetOptrNS(@OpenTrigger)::MSG_GEN_SET_ENABLED(VUM_NOW);
+    else
+      @send GeodeGetOptrNS(@OpenTrigger)::MSG_GEN_SET_NOT_ENABLED(VUM_NOW);
+}
+
+@method HelpViewProcessClass, MSG_HelpView_OPEN_TRIGGER
+{
+    GenFileSelectorEntryFlags entryFlags;
+
+    entryFlags = GFS_GET_ENTRY_FLAGS(
+      @call GeodeGetOptrNS(@ConvFileS)::MSG_GEN_FILE_SELECTOR_GET_SELECTION
+        (NULL));                        /* get flags of current selection */
+    if(GFS_GET_ENTRY_TYPE(entryFlags)==GFSET_FILE)
+      open_action();                    /* a file is selected: convert it! */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_GO_TO_HELP_TRIGGER
+{
+    @call GeodeGetOptrNS(@ConvFileS)::
+      MSG_GEN_FILE_SELECTOR_SET_FULL_SELECTION_PATH("\\",SP_HELP_FILES);
+                                        /* open standard help file path */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_RECORD
+{
+    appstate.n_slides=0;                /* no slides recorded */
+    record_mode=1;                      /* recording becomes active */
+    lasttime=TimerGetCount();           /* time when recording started */
+    bring_up_toc(UI_REQU_REC);          /* bring up toc in recording config */
+    update_record_controls();           /* set recorder controls to state */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_STOP
+{
+    dword t=TimerGetCount();
+
+    if(record_mode==1) {                /* recording? add final "wrap" slide */
+      appstate.slide[appstate.n_slides].type=ST_BRING_UP_TOC;
+      appstate.slide[appstate.n_slides].time=t-lasttime;
+      appstate.n_slides++;              /* count slides */
+    }
+    stop_action();                      /* stop recorder/player */
+    bring_up_toc(UI_REQU_DEF);          /* bring up toc in default config */
+    update_record_controls();           /* set recorder controls to state */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_PAUSE
+{
+    if(turn_th) {                       /* still playing? */
+      TimerStop(turn_th,turn_tid);      /* Kill pending turnover event */
+      turn_th=0;                        /* note that timer has been removed */
+    }
+    record_mode=3;                      /* set state to "paused" */
+    update_record_controls();           /* set recorder controls to state */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_PLAY
+{
+    if(record_mode!=3) {                /* not paused? */
+      play_position=0;                  /* start at the beginning */
+      bring_up_toc(UI_REQU_PLA);        /* bring up toc in player config */
+    }
+    record_mode=2;                      /* start playback */
+    update_record_controls();           /* set recorder controls to state */
+    schedule_next_step(oself);          /* set timer for next page change */
+}
+
+@method HelpViewProcessClass, MSG_HelpView_TURN_PAGE
+{
+    optr helpobj=GeodeGetOptrNS(@HelpViewHelpObject);
+
+    turn_th=0;                          /* no more turning timer */
+    if(record_mode==2) {                /* playback still running? */
+      switch(appstate.slide[play_position].type) {
+
+        case ST_FOLLOW_LINK:            /*** jump to a link */
+          @send helpobj::MSG_HELP_CONTROL_FOLLOW_LINK(
+            appstate.slide[play_position].d.link.nameToken,
+            appstate.slide[play_position].d.link.fileToken);
+                                        /* turn page in help file */
+          break;
+
+        case ST_GO_BACK:                /*** go back to previous topic */
+          @send helpobj::MSG_HC_GO_BACK();
+          break;
+
+        case ST_BRING_UP_TOC:           /*** bring up contents topic */
+          @send helpobj::MSG_HC_BRING_UP_TOC();
+          break;
+
+        case ST_CHOOSE_FA:              /*** jump to a First Aid item */
+          @send helpobj::MSG_HC_CHOOSE_FIRST_AID(
+            appstate.slide[play_position].d.fatype);
+                                        /* turn page in help file */
+          break;
+      }
+      if(++play_position>=appstate.n_slides)
+        play_position=0;                /* go to next step, possibly wrap */
+      schedule_next_step(oself);        /* prepare for next turning event */
+    }
+}
+
+@method HelpViewHelpControlClass, MSG_HELP_CONTROL_FOLLOW_LINK
+{
+    dword t=TimerGetCount();
+
+    if(record_mode==1) {                /* recording? */
+      appstate.slide[appstate.n_slides].type=ST_FOLLOW_LINK;
+      appstate.slide[appstate.n_slides].d.link.nameToken=nameToken;
+      appstate.slide[appstate.n_slides].d.link.fileToken=fileToken;
+      appstate.slide[appstate.n_slides].time=t-lasttime;
+      lasttime=t;                       /* time when slide was changed */
+      appstate.n_slides++;              /* count slides */
+    }
+    @callsuper();
+}
+
+@method HelpViewHelpControlClass, MSG_META_DETACH
+{
+    if(record_mode==1)                  /* recording aborted? */
+      appstate.n_slides=0;              /* erase incomplete sequence */
+    stop_action();                      /* stop recorder/player */
+    @callsuper();
+}
+
+@method HelpViewHelpControlClass, MSG_HC_GO_BACK
+{
+    dword t=TimerGetCount();
+
+    if(record_mode==1) {                /* recording? */
+      appstate.slide[appstate.n_slides].type=ST_GO_BACK;
+      appstate.slide[appstate.n_slides].time=t-lasttime;
+      lasttime=t;                       /* time when slide was changed */
+      appstate.n_slides++;              /* count slides */
+    }
+    @callsuper();
+}
+
+@method HelpViewHelpControlClass, MSG_HC_CHOOSE_FIRST_AID
+{
+    dword t=TimerGetCount();
+
+    if(record_mode==1) {                /* recording? */
+      appstate.slide[appstate.n_slides].type=ST_CHOOSE_FA;
+      appstate.slide[appstate.n_slides].d.fatype=fatype;
+      appstate.slide[appstate.n_slides].time=t-lasttime;
+      lasttime=t;                       /* time when slide was changed */
+      appstate.n_slides++;              /* count slides */
+    }
+    @callsuper();
+}

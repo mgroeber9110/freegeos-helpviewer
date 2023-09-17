@@ -1,0 +1,158 @@
+@object GenFileSelectorClass ConvFileS = {
+    GFSI_destination = process; 
+    GFSI_notificationMsg = MSG_Help_OPEN_FILE; 
+    ATTR_GEN_FILE_SELECTOR_CREATOR_MATCH = {"hlpv",0};
+    HINT_FILE_SELECTOR_NUMBER_OF_FILES_TO_SHOW = 8;
+    HINT_FILE_SELECTOR_FILE_LIST_WIDTH = 40;
+}
+@object GenTriggerClass OpenTrigger = {
+    GI_visMoniker = 'O',"Open";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_OPEN_TRIGGER;
+    HINT_SEEK_REPLY_BAR;
+}
+@object GenTriggerClass help_ui_obj0006 = {
+    GI_visMoniker = 'H',"Go to Help";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_GO_TO_HELP_TRIGGER;
+    HINT_SEEK_REPLY_BAR;
+}
+@object GenTriggerClass TriggerRecord = {
+    GI_visMoniker = "Record";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_RECORD;
+}
+@object GenTriggerClass TriggerPlay = {
+    GI_visMoniker = "Play";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_PLAY;
+}
+@object GenTriggerClass TriggerStop = {
+    GI_visMoniker = "Stop";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_STOP;
+}
+@object GenTriggerClass TriggerPause = {
+    GI_visMoniker = "Pause";
+    GTI_destination = process;
+    GTI_actionMsg = MSG_HelpView_PAUSE;
+}
+@object GenInteractionClass OpenDialog = {
+    GI_visMoniker = 'O',"Open";
+    GII_visibility = GIV_DIALOG;
+    GII_type = GIT_COMMAND;
+@ifndef _PMVG_GI_comp_0003
+@define _PMVG_GI_comp_0003
+  GI_comp =
+@else
+  ,
+@endif
+    @ConvFileS
+@ifndef _PMVG_GI_comp_0003
+@define _PMVG_GI_comp_0003
+  GI_comp =
+@else
+  ,
+@endif
+    @OpenTrigger
+@ifndef _PMVG_GI_comp_0003
+@define _PMVG_GI_comp_0003
+  GI_comp =
+@else
+  ,
+@endif
+    @help_ui_obj0006
+@ifdef _PMVG_GI_comp_0003
+  ;
+@endif
+}
+@object GenInteractionClass help_ui_obj0007 = {
+    GI_visMoniker = 'w',"Slide show";
+    GII_visibility = GIV_POPUP;
+@ifndef _PMVG_GI_comp_0007
+@define _PMVG_GI_comp_0007
+  GI_comp =
+@else
+  ,
+@endif
+    @TriggerRecord
+@ifndef _PMVG_GI_comp_0007
+@define _PMVG_GI_comp_0007
+  GI_comp =
+@else
+  ,
+@endif
+    @TriggerPlay
+@ifndef _PMVG_GI_comp_0007
+@define _PMVG_GI_comp_0007
+  GI_comp =
+@else
+  ,
+@endif
+    @TriggerStop
+@ifndef _PMVG_GI_comp_0007
+@define _PMVG_GI_comp_0007
+  GI_comp =
+@else
+  ,
+@endif
+    @TriggerPause
+@ifdef _PMVG_GI_comp_0007
+  ;
+@endif
+}
+@object GenInteractionClass help_ui_obj0002 = {
+    /*
+     *              File menu
+     */
+    GII_visibility = GIV_POPUP;         /* create popup menu */
+    ATTR_GEN_INTERACTION_GROUP_TYPE = GIGT_FILE_MENU;
+                                        /* place into file menu */
+@ifndef _PMVG_GI_comp_0002
+@define _PMVG_GI_comp_0002
+  GI_comp =
+@else
+  ,
+@endif
+    @OpenDialog
+@ifndef _PMVG_GI_comp_0002
+@define _PMVG_GI_comp_0002
+  GI_comp =
+@else
+  ,
+@endif
+    @help_ui_obj0007
+@ifdef _PMVG_GI_comp_0002
+  ;
+@endif
+}
+@object HelpViewHelpControlClass HelpViewHelpObject = {
+    GII_visibility = GIV_SUB_GROUP;
+    HCI_helpType = HT_NORMAL_HELP;
+    HINT_EXPAND_WIDTH_TO_FIT_PARENT;
+    HINT_EXPAND_HEIGHT_TO_FIT_PARENT;
+    ATTR_HELP_INITIAL_HELP = "TOC";
+
+    /* UI_PROH_DEF and UI_REQU_DEF are defined in the main application. */
+    ATTR_GEN_CONTROL_PROHIBIT_UI = UI_PROH;
+    ATTR_GEN_CONTROL_REQUIRE_UI = UI_REQU;
+}
+@object GenPrimaryClass HelpViewPrimary = {
+@ifndef _PMVG_GI_comp_0001
+@define _PMVG_GI_comp_0001
+  GI_comp =
+@else
+  ,
+@endif
+    @help_ui_obj0002
+@ifndef _PMVG_GI_comp_0001
+@define _PMVG_GI_comp_0001
+  GI_comp =
+@else
+  ,
+@endif
+    @HelpViewHelpObject
+@ifdef _PMVG_GI_comp_0001
+  ;
+@endif
+}
