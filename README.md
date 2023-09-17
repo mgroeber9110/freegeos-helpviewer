@@ -13,7 +13,7 @@ This program can also be used with GeoPublish.
 ## PMVG
 
 Note: in case you are wondering what the `help_ui.pvg` file is, this is
-an alternative format ("Poor Man's Visual GEOS) for .goh files that I
+an alternative format ("Poor Man's Visual GEOS") for .goh files that I
 optimized for folding editors and allowed defining the GenTree trough
 a nested, foldable syntax, replacing the cumbersome `GI_comp` structure.
 
